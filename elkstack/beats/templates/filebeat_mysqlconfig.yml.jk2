@@ -1,0 +1,6 @@
+#Mysql module consumes error and mysql-slow logs from mounted volume
+- module: mysql
+  error:
+    var.paths: ["/var/logs/mysql/error.log*"]
+  slowlog:
+    var.paths: ["/var/logs/mysql/mysql-slow.log*"]

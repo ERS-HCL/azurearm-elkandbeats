@@ -1,0 +1,260 @@
+{
+    "$schema": "https://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "adminUsername": {
+            "type": "string",
+            "metadata": {
+                "description": "User name for the Virtual Machine."
+            }
+        },
+        "sshPublicKey": {
+            "type": "string",
+            "metadata": {
+                "description": "Configure the linux machines with the SSH public key string.  Your key should include three parts, for example 'ssh-rsa AAAAB...snip...UcyupgH azureuser@linuxvm'"
+            }
+        },
+        "elkDnsPrefix": {
+            "type": "string",
+			"maxLength": 50,
+            "metadata": {
+                "description": "Unique DNS Name for the Public IP used to access the Virtual Machine."
+            }
+        },
+		"elkserver_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install elasticsearch, kibana,logstash."
+            },
+			"defaultValue": "present"
+			},
+		"filebeat_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install filebeat."
+            },
+			"defaultValue": "present"
+			},
+		"packetbeat_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install packetbeat."
+            },
+			"defaultValue": "present"
+			},
+		"metricbeat_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install  metricbeat."
+            },
+			"defaultValue": "present"
+			},
+		"nginxservice_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install nginx to capture logs."
+            },
+			"defaultValue": "present"
+			},
+		"apache2service_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install apache2 for logs."
+            },
+			"defaultValue": "present"
+			},
+		"mysqlservice_status": {
+            "type": "string",			
+            "metadata": {
+                "description": " status to determine whether to install mysql for logs."
+            },
+			"defaultValue": "present"
+			},        
+		"_artifactsLocation": {
+          "type": "string",
+          "metadata": {
+              "description": "The base URI where artifacts required by this template are located. When the template is deployed using the accompanying scripts, a private location in the subscription will be used and this value will be automatically generated."
+          },
+          "defaultValue": "https://raw.githubusercontent.com/ERS-HCL/azurearm-elkandbeats/master/"
+      },
+      "_artifactsLocationSasToken": {
+          "type": "securestring",
+          "metadata": {
+              "description": "The sasToken required to access _artifactsLocation.  When the template is deployed using the accompanying scripts, a sasToken will be automatically generated."
+          },
+          "defaultValue": ""
+      }
+    },
+    "variables": {
+        "resourcePrefix": "elk",
+        "storageAccountName": "[concat(variables('resourcePrefix'), uniquestring(resourceGroup().id))]",
+        "OSDiskName": "[concat(variables('resourcePrefix'), 'OSDisk')]",
+        "nicName": "[concat(variables('resourcePrefix'), 'VMNic')]",
+        "subnetName": "[concat(variables('resourcePrefix'), 'Subnet')]",
+        "publicIPAddressName": "[concat(variables('resourcePrefix'), 'PublicIP')]",
+        "vmStorageAccountContainerName": "vhds",
+        "vmName": "[concat(variables('resourcePrefix'), 'VM')]",
+        "vmExtensionName": "[concat(variables('resourcePrefix'), 'Init')]",
+        "virtualNetworkName": "[concat(variables('resourcePrefix'), 'VNET')]",
+        "_extensionScript": "elksetupscript.sh",
+        "_configfilelocation": "[concat(parameters('_artifactsLocation'), 'elkstack/elkstack.zip',parameters('_artifactsLocationSasToken'))]"
+		
+    },
+    "resources": [{
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('storageAccountName')]",
+            "apiVersion": "2017-10-01",
+            "location": "[resourceGroup().location]",
+            "sku": {
+                "name": "Standard_LRS"
+            },
+            "kind": "Storage",
+            "properties": {}
+        }, {
+            "apiVersion": "2017-10-01",
+            "type": "Microsoft.Network/publicIPAddresses",
+            "name": "[variables('publicIPAddressName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "publicIPAllocationMethod": "Dynamic",
+                "dnsSettings": {
+                    "domainNameLabel": "[concat(parameters('elkDnsPrefix'),uniquestring(resourceGroup().id))]"					
+                }
+            }
+        }, {
+            "apiVersion": "2017-10-01",
+            "type": "Microsoft.Network/virtualNetworks",
+            "name": "[variables('virtualNetworkName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "addressSpace": {
+                    "addressPrefixes": [
+                        "10.0.0.0/16"
+                    ]
+                },
+                "subnets": [{
+                    "name": "[variables('subnetName')]",
+                    "properties": {
+                        "addressPrefix": "10.0.0.0/24"
+
+                    }
+                }]
+            }
+        }, {
+            "apiVersion": "2016-09-01",
+            "type": "Microsoft.Network/networkInterfaces",
+            "name": "[variables('nicName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]",
+                "[resourceId('Microsoft.Network/virtualNetworks', variables('virtualNetworkName'))]"
+            ],
+            "properties": {
+                "ipConfigurations": [{
+                    "name": "ipconfig1",
+                    "properties": {
+                        "privateIPAllocationMethod": "Dynamic",
+                        "publicIPAddress": {
+                            "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('publicIPAddressName'))]"
+                        },
+                        "subnet": {
+                            "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('virtualNetworkName'),variables('subnetName'))]"
+                        }
+                    }
+                }]
+            }
+        },
+
+        {
+            "apiVersion": "2017-12-01",
+            "type": "Microsoft.Compute/virtualMachines",
+            "name": "[variables('vmName')]",
+            "location": "[resourceGroup().location]",
+            "dependsOn": [
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+                "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+            ],
+            "properties": {
+                "hardwareProfile": {
+                    "vmSize": "Standard_D2S_v3"
+                },
+                "osProfile": {
+                    "computerName": "[variables('vmName')]",
+                    "adminUsername": "[parameters('adminUsername')]",
+                    "linuxConfiguration": {
+                        "disablePasswordAuthentication": true,
+                        "ssh": {
+                            "publicKeys": [{
+                                "path": "[concat('/home/',parameters('adminUsername'),'/.ssh/authorized_keys')]",
+                                "keyData": "[parameters('sshPublicKey')]"
+                            }]
+                        }
+                    }
+                },
+                "storageProfile": {
+                    "imageReference": {
+                        "publisher": "Canonical",
+                        "offer": "UbuntuServer",
+                        "sku": "14.04.5-LTS",
+                        "version": "latest"
+                    },
+                    "osDisk": {
+                        "name": "osdisk",
+                        "vhd": {
+                            "uri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2016-01-01').primaryEndpoints.blob, variables('vmStorageAccountContainerName'), '/', variables('OSDiskName'), '.vhd')]"
+                        },
+                        "caching": "ReadWrite",
+                        "createOption": "FromImage"
+                    }
+                },
+                "networkProfile": {
+                    "networkInterfaces": [{
+                        "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nicName'))]"
+                    }]
+                },
+                "diagnosticsProfile": {
+                    "bootDiagnostics": {
+                        "enabled": true,
+                        "storageUri": "[concat(reference(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2016-01-01').primaryEndpoints.blob)]"
+                    }
+                }
+            },
+            "resources": [{
+                "type": "extensions",
+                "name": "[variables('vmExtensionName')]",
+                "apiVersion": "2017-12-01",
+                "location": "[resourceGroup().location]",
+                "dependsOn": [
+                    "[resourceId('Microsoft.Compute/virtualMachines', variables('vmName'))]"
+                ],
+                "properties": {
+                    "publisher": "Microsoft.Azure.Extensions",
+                    "type": "CustomScript",
+                    "typeHandlerVersion": "2.0",
+                    "autoUpgradeMinorVersion": true,
+                    "settings": {
+                        "fileUris": [
+                            "[concat(parameters('_artifactsLocation'),'elkstack/',variables('_extensionScript'),parameters('_artifactsLocationSasToken'))]"
+                        ],
+                        "timestamp": 11552018
+                    },
+                    "protectedSettings": {
+                        "commandToExecute": "[concat('sh elksetupscript.sh',' ',variables('_configfilelocation'),'  ',parameters('elkserver_status'),'  ',parameters('filebeat_status'),'  ',parameters('packetbeat_status'),'  ',parameters('metricbeat_status'),'  ',parameters('nginxservice_status'),'  ',parameters('apache2service_status'),'  ',parameters('mysqlservice_status'))]"
+						
+                    }
+
+                }
+            }]
+        }
+    ],
+    "outputs": {
+        "elkstackVmFQDN": {
+            "type": "string",
+            "value": "[reference(variables('publicIPAddressName')).dnsSettings.fqdn]"
+        },
+        "SSH": {
+            "type": "string",
+            "value": "[concat('ssh -L 5601:localhost:5601 ', parameters('adminUsername'), '@', reference(variables('publicIPAddressName')).dnsSettings.fqdn)]"
+        }
+    }
+}

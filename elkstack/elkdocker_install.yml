@@ -1,0 +1,160 @@
+--- 
+- 
+  connection: localhost
+  hosts: localhost
+  vars: 
+    kibana_passwd: changeme
+    kibana_user: elastic
+    elasticsearch_password: changeme
+    elasticsearch_user: elastic
+    elasticsearchIP: 127.0.0.1
+    elkserver_package: "{{ elkserver_status }}"
+    beatversion: 6.2.4
+    default_index_pattern: heartbeat-*
+    kibanaurl: "http://{{ elasticsearch_user }}:{{ elasticsearch_password }}@localhost:5601"    
+    beats_package:
+     - { 'name': 'configure_filebeat', 'state': "{{ filebeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'configure_metricbeat', 'state': "{{ metricbeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'configure_packetbeat', 'state': "{{ packetbeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'configure_heartbeat', 'state': "present", 'version': "{{beatversion}}" }
+     - { 'name': 'filebeat', 'state': "{{ filebeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'metricbeat', 'state': "{{ metricbeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'packetbeat', 'state': "{{ packetbeat_state }}", 'version': "{{beatversion}}" }
+     - { 'name': 'heartbeat', 'state': "present", 'version': "{{beatversion}}" }
+
+    services_package:
+     - { 'name': 'nginx', 'state': "absent", 'version': 'latest' }
+     - { 'name': 'apache2', 'state': "{{ apache2_state }}", 'version': 'latest' }
+     - { 'name': 'mysql', 'state': "{{ mysql_state }}", 'version': 'latest' }
+  tasks: 
+    - 
+      args: 
+        chdir: /home/
+      command: "curl -fsSL get.docker.com -o get-docker.sh"
+      name: "Download docker script"
+    - 
+      name: "run docker script"
+      script: /home/get-docker.sh
+    - 
+      name: "start Docker"
+      service: 
+        name: docker
+        state: started
+    - 
+      apt: 
+        name: python-pip
+        state: present
+      name: "install pip"
+      register: results
+    - 
+      debug: 
+        var: results
+    - 
+      command: "pip install docker-compose"
+      name: "install docker-compose"
+    - 
+      args: 
+        chdir: /home/elkstack/elkserver/
+      command: "docker-compose -f docker-compose.yml up -d "
+      name: "elkserver docker up"
+      when: "{{ elkserver_status == 'present'}}"
+    - 
+      file: 
+        mode: 420
+        path: /home/elkstack/services/install-nginx.sh
+      name: "change file permission"
+    - 
+      command: " sh /home/elkstack/services/install-nginx.sh"
+      name: "nginx service up"
+      when: "{{ nginx_state == 'present'}}"
+    - 
+      args: 
+        chdir: /home/elkstack/services/
+      command: "docker-compose -f docker-compose-services.yml up -d {{item.name}}"
+      name: "services docker up"
+      when: "{{ item.state == 'present'}}"
+      with_items: "{{ services_package }}"      
+    - 
+      name: changing filebeat file with Apache module
+      template:
+        src: /home/elkstack/beats/templates/filebeat_apacheconfig.yml.jk2
+        dest: /home/temp1.txt
+      register: result
+      run_once: true
+    -  
+      name:
+      shell: cat /home/temp1.txt >> /home/elkstack/beats/config/filebeat/filebeat.yml
+      run_once: true
+      when: (apache2_state == "present") 	 
+    -  
+      name: changing filebeat file with Nginx module
+      template:
+         src: /home/elkstack/beats/templates/filebeat_nginxconfig.yml.jk2
+         dest: /home/temp2.txt
+      register: result1
+      run_once: true
+    -   
+      name:
+      shell: cat /home/temp2.txt >> /home/elkstack/beats/config/filebeat/filebeat.yml
+      run_once: true
+      when: (nginx_state == "present") 
+    - 
+      name: changing filebeat file with MySQL module
+      template:
+        src: /home/elkstack/beats/templates/filebeat_mysqlconfig.yml.jk2
+        dest: /home/temp3.txt
+      register: result2
+      run_once: true
+    - 
+      name:
+      shell: cat /home/temp3.txt >> /home/elkstack/beats/config/filebeat/filebeat.yml
+      run_once: true
+      when: (mysql_state == "present") 
+    - 
+      name: changing filebeat file with output module
+      template:
+        src: /home/elkstack/beats/templates/output-elasticsearchconfig.jk2
+        dest: /home/output1.txt
+      register: output
+      run_once: true
+    -  
+      name: adding elasticsearch output
+      shell: cat /home/output1.txt >> /home/elkstack/beats/config/filebeat/filebeat.yml
+      run_once: true      	  
+    - 
+      args: 
+        chdir: /home/elkstack/beats/      
+      command: "docker-compose -f docker-compose-beats.yml up -d {{item.name}}"
+      name: "Beats docker up"
+      when: "{{ item.state == 'present'}}"
+      with_items: "{{ beats_package }}"		
+    - 
+      name: "Wait 10 seconds for port 5601 to become open on the host, don't start checking for 10 seconds"
+      wait_for: 
+        delay: 10
+        port: 5601
+    - 
+      name: "Wait 10 seconds for port 9200 to become open on the host, don't start checking for 10 seconds"
+      wait_for: 
+        delay: 10
+        port: 9200
+    - 
+      command: "curl -s http://localhost:9200/_cat/indices?pretty -u {{ elasticsearch_user }}:{{ elasticsearch_password }}"
+      name: "check if elasticsearch returns any indices"
+    # - 
+      # file: 
+        # mode: 420
+        # path: /home/elkstack/beats/setupkibanadefaultindex.sh
+      # name: "change file permission"
+    # -
+      # command: sh /home/elkstack/beats/setupkibanadefaultindex.sh  "{{ kibanaurl }}"
+      # name: "set default index pattern"
+    - 
+      debug: 
+        var: HostIP
+        var: filebeat_state
+        var: metricbeat_state
+        var: packetbeat_state
+  
+    
+   

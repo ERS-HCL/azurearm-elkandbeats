@@ -1,0 +1,8 @@
+{
+  "itemDisplayName": "AzureARM-ELK",
+  "icon": "ubuntu",
+  "description": "This template allows you to deploy an instance of ELK server and beats on a Linux Ubuntu VM. This will deploy a VM in the resource group location and return the FQDN of the VM. This will install the components of ELk, Beats and services to ingest logs",
+  "summary": "This template allows you to deploy an instance of ELK server and beats on a Linux Ubuntu VM. This will deploy a VM in the resource group location and return the FQDN of the VM. This will install the components of ELk, Beats.",
+  "githubUsername": "lavanyasubbarayalu",
+  "dateUpdated": "2018-05-21"
+}

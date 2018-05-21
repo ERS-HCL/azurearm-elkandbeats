@@ -1,0 +1,5 @@
+#All data to indexed to Elasticsearch
+output.elasticsearch:
+  hosts: ['elasticsearch:9200']
+  username: {{elasticsearch_user}}
+  password: {{elasticsearch_password}}

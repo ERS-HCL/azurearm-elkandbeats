@@ -1,0 +1,64 @@
+---
+version: '2'
+services:
+  # The environment variable "TAG" is set in the
+  # '.env' file in this folder. It can be overridden with any normal
+  # technique for setting environment variables, for example:
+  #
+  #   TAG=6.2.3 docker-compose up
+  # a full invocation might look like:
+  #
+  #   ELASTIC_VERSION=6.2.3 TAG=6.2.3 docker-compose up
+  #
+ #Nginx container
+  nginx:
+    container_name: nginx
+    hostname: nginx
+    build: ./nginx
+    networks: ['elkserver_elkstack']
+    #Expose port 80 to allow users to hit content and generate data for filebeat and packetbeat
+    ports: ['80:80']
+    command: nginx -g 'daemon off;'
+    volumes:
+      #Logs are mounted to a relative path. These are also accessed by Filebeat and consumed by the Nginx module
+      - ./logs/nginx/:/var/logs/nginx/
+
+  #Apache2 container
+  apache2:
+    container_name: apache2
+    hostname: apache2
+    build: ./apache2
+    networks: ['elkserver_elkstack']
+    #Expose port 80 as port 800 to allow users to hit content and generate data for filebeat and packetbeat
+    ports: ['8000:80']
+    volumes:
+      #Logs are mounted to a relative path. These are also accessed by Filebeat and consumed by the Apache module
+      - ./logs/apache2/:/var/logs/apache2/
+
+  #Mysql container
+  mysql:
+    container_name: mysql
+    hostname: mysql
+    build: ./mysql
+    environment:
+      - "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}"
+    networks: ['elkserver_elkstack']
+    #Expose port 3306 to allow users to connect and perform operations. These will be picked up by Packetbeat, Filebeat and Metricbeat
+    ports: ['3306:3306']
+    command: bash -c "chown -R mysql:mysql /var/log/mysql && exec /entrypoint.sh mysqld"
+    volumes:
+      #Use named volume so mysql data is persisted across restart
+      - mysqldata:/var/lib/mysql/
+      #Logs are mounted to a relative path. These are also accessed by Filebeat and consumed by the Mysql module
+      - ./logs/mysql:/var/logs/mysql/
+ 
+volumes:
+  #Mysql data
+  mysqldata:
+    driver: local
+
+networks: 
+  elkserver_elkstack: 
+    external: true
+    
+

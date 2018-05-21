@@ -1,0 +1,148 @@
+---
+version: '2'
+services:
+  # The environment variable "TAG" is set in the
+  # '.env' file in this folder. It can be overridden with any normal
+  # technique for setting environment variables, for example:
+  #
+  #   TAG=6.2.3 docker-compose up
+  # a full invocation might look like:
+  #
+  #   ELASTIC_VERSION=6.2.3 TAG=6.2.3 docker-compose up
+  #
+    
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:${TAG}
+    container_name: filebeat
+    user: root
+    command: -e -E output.elasticsearch.username=elastic -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}' -strict.perms=false
+    # If the host system has logs at "/var/log", mount them at "/mnt/log"
+    # inside the container, where Filebeat can find them.
+    volumes:
+      #Mount the filebeat configuration so users can make edit
+      - ./config/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      #Mount the prospectors directory. Users can in turn add propspectors to this directory and they will be dynamically loaded
+      - ./config/filebeat/prospectors.d/:/usr/share/filebeat/prospectors.d/:ro
+      #Mount the nginx logs into the filebeat container so we can access and index them using the filebeat nginx module
+      - ./logs/nginx/:/var/logs/nginx/
+      - /var/log/nginx/:/var/logs/nginx/
+      #Mount the apache2 logs into the filebeat container so we can access and index them using the filebeat apache2 module
+      - ./logs/apache2/:/var/logs/apache2/
+      #Mount the mysql logs into the filebeat container so we can access and and index them using the filebeat mysql module
+      - ./logs/mysql/:/var/logs/mysql/
+      #Mount the hosts system log directory. This represents the logs of the VM hosting docker. Consumed by the filebeat system module.
+      - /var/logs/:/var/logs/host/:ro
+      #Mount the docker logs for indexing by the custom prospector ./config/filebeat/prospectors.d
+      #- /var/lib/docker/containers:/hostfs/var/lib/docker/containers
+      #Named volume fsdata. This is used to persist the registry file between restarts, so to avoid data duplication
+      - fbdata:/usr/share/filebeat/data/
+    networks: ['elkserver_elkstack']
+    #restart: on-failure
+    #wait for the these services to come up. This ensures the logs are available and ES exists for indexing
+    #depends_on: ['setup_filebeat']
+    
+  
+  heartbeat:
+    image: docker.elastic.co/beats/heartbeat:${TAG}
+    container_name: heartbeat
+    command: -e -E output.elasticsearch.username=elastic -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}' -strict.perms=false
+    volumes:
+      - ./config/heartbeat/heartbeat.yml:/usr/share/heartbeat/heartbeat.yml:ro
+    networks: ['elkserver_elkstack']
+    #depends_on: ['setup_heartbeat']
+
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:${TAG}
+    container_name: metricbeat
+    user: root
+    # The commented sections below enable Metricbeat to monitor the Docker host,
+    # rather than the Metricbeat container. It's problematic with Docker for
+    # Windows, however, since "/proc", "/sys" etc. don't exist on Windows.
+    # The same likely applies to OSX (needs testing).
+    # volumes:
+    #   - /proc:/hostfs/proc:ro
+    #   - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+    #   - /:/hostfs:ro
+    command: -e -system.hostfs=/hostfs -E output.elasticsearch.username=elastic -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}' -strict.perms=false # -system.hostfs=/hostfs 
+    volumes:
+     #Mount the metricbeat configuration so users can make edit
+      - ./config/metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      #Mount the modules.d directory into the container. This allows user to potentially make changes to the modules and they will be dynamically loaded.
+      - ./config/metricbeat/modules.d/:/usr/share/metricbeat/modules.d/:rw
+      # The commented sections below enable Metricbeat to monitor the Docker host rather than the Metricbeat container. These are used by the system module.
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      #Allows us to report on docker from the hosts information
+      - /var/run/docker.sock:/var/run/docker.sock
+      #We mount the host filesystem so we can report on disk usage with the system module
+      - /:/hostfs:ro
+    networks: ['elkserver_elkstack']
+    #depends_on: ['setup_metricbeat']
+    restart: on-failure
+    environment:
+      - "MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}"
+
+  packetbeat:
+    image: docker.elastic.co/beats/packetbeat:${TAG}
+    container_name: packetbeat
+    # Packetbeat needs some elevated privileges to capture network traffic.
+    # We'll grant them with POSIX capabilities.
+    cap_add: ['NET_RAW', 'NET_ADMIN']
+    # Use "host mode" networking to allow Packetbeat to capture traffic from
+    # the real network interface on the host, rather than being isolated to the
+    # container's virtual interface.
+    network_mode: host
+    # Since we did that, Packetbeat is not part of the "stack" Docker network
+    # that the other containers are connected to, and thus can't resolve the
+    # hostname "elasticsearch". Instead, we'll tell it to find Elasticsearch
+    # on "localhost", which is the Docker host machine in this context.
+    command: -e -E output.elasticsearch.username=elastic -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}' -E 'output.elasticsearch.hosts=["localhost:9200"]' -strict.perms=false
+#    command: -e -E 'output.elasticsearch.hosts=["localhost:9200"]' -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}' -strict.perms=false
+    volumes:
+      - ./config/packetbeat/packetbeat.yml:/usr/share/packetbeat/packetbeat.yml:ro
+      - ./samplelogs/nginx/:/var/log/nginx/
+   # depends_on: ['setup_packetbeat']
+     
+  configure_filebeat:
+    image: docker.elastic.co/beats/filebeat:${TAG}
+    container_name: setup_beat
+    volumes: ['./scripts/setup-beat.sh:/usr/local/bin/setup-beat.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-beat.sh | tr -d "\r" | bash -s filebeat']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkserver_elkstack']
+    
+  configure_heartbeat:
+    image: docker.elastic.co/beats/heartbeat:${TAG}
+    container_name: setup_beats
+    volumes: ['./scripts/setup-beat.sh:/usr/local/bin/setup-beat.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-beat.sh | tr -d "\r" | bash -s heartbeat']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkserver_elkstack']
+   
+  configure_metricbeat:
+    image: docker.elastic.co/beats/metricbeat:${TAG}
+    container_name: setup_metricbeat
+    volumes: ['./scripts/setup-beat.sh:/usr/local/bin/setup-beat.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-beat.sh | tr -d "\r" | bash -s metricbeat']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkserver_elkstack']
+ 
+  configure_packetbeat:
+    image: docker.elastic.co/beats/packetbeat:${TAG}
+    container_name: setup_packetbeat
+    cap_add: ['NET_RAW', 'NET_ADMIN']
+    volumes: ['./scripts/setup-beat.sh:/usr/local/bin/setup-beat.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-beat.sh | tr -d "\r" | bash -s packetbeat']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkserver_elkstack']
+  
+volumes:    
+  #Filebeat data i.e. registry file
+  fbdata:
+    driver: local
+
+networks: 
+  elkserver_elkstack:
+    external: true
+    
+

@@ -1,0 +1,6 @@
+#Nginx Module to consume to access and error logs from mounted volume
+- module: nginx
+  access:
+    var.paths: ["/var/logs/nginx/access.log*"]
+  error:
+    var.paths: ["/var/logs/nginx/error.log*"]

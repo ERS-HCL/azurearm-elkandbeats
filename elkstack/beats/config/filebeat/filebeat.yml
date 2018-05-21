@@ -1,0 +1,6 @@
+filebeat.registry_file: /usr/share/filebeat/data/registry
+filebeat.config.prospectors:
+#prospectors dynamically loaded from the sub-directory
+  path: ${path.config}/prospectors.d/*.yml
+  reload.enabled: false
+filebeat.modules:

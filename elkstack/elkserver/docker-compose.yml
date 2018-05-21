@@ -1,0 +1,82 @@
+---
+version: '3'
+services:
+  # The environment variable "TAG" is set in the
+  # '.env' file in this folder. It can be overridden with any normal
+  # technique for setting environment variables, for example:
+  #
+  #   TAG=6.2.3 docker-compose up
+  # full invocation might look like:
+  #
+  #   ELASTIC_VERSION=6.2.3 TAG=6.2.3 docker-compose up
+  #
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch-platinum:${TAG}
+    container_name: elasticsearch
+    environment: ['http.host=0.0.0.0', 'transport.host=127.0.0.1', 'ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    ports: ['9200:9200']
+    networks: ['elkstack']
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:${TAG}
+    container_name: kibana
+    environment:
+      - ELASTICSEARCH_USERNAME=kibana
+      - ELASTICSEARCH_PASSWORD=${ELASTIC_PASSWORD}
+    ports: ['5601:5601']
+    networks: ['elkstack']
+    depends_on: ['elasticsearch']
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:${TAG}
+    container_name: logstash
+    environment:
+      - 'xpack.monitoring.elasticsearch.password=${ELASTIC_PASSWORD}'   
+    volumes:
+      - ./config/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    networks: ['elkstack']
+    ports: ['5000:5000']
+    depends_on: ['elasticsearch', 'setup_logstash']
+  
+  apm_server:
+    image: docker.elastic.co/apm/apm-server:${TAG}
+    container_name: apm_server
+    ports: ['8200:8200']
+    networks: ['elkstack']
+    command: -e -E 'output.elasticsearch.password=${ELASTIC_PASSWORD}'
+    depends_on: ['elasticsearch','setup_apm_server']
+
+  # Run a short-lived container to set up Logstash.
+  setup_logstash:
+    image: centos:7
+    container_name: setup_logstash
+    volumes: ['./scripts/setup-logstash.sh:/usr/local/bin/setup-logstash.sh:ro']
+    # The script may have CR/LF line endings if using Docker for Windows, so
+    # make sure that they don't confuse Bash.
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-logstash.sh | tr -d "\r" | bash']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkstack']
+    depends_on: ['elasticsearch']
+
+  setup_kibana:
+    image: centos:7
+    container_name: setup_kibana
+    volumes: ['./scripts/setup-kibana.sh:/usr/local/bin/setup-kibana.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-kibana.sh | tr -d "\r" | bash']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkstack']
+    depends_on: ['elasticsearch']
+
+  setup_apm_server:
+    image: docker.elastic.co/apm/apm-server:${TAG}
+    container_name: setup_apm_server
+    volumes: ['./scripts/setup-beat.sh:/usr/local/bin/setup-beat.sh:ro']
+    command: ['/bin/bash', '-c', 'cat /usr/local/bin/setup-beat.sh | tr -d "\r" | bash -s apm-server']
+    environment: ['ELASTIC_PASSWORD=${ELASTIC_PASSWORD}']
+    networks: ['elkstack']
+    depends_on: ['elasticsearch','kibana']
+
+
+networks: 
+  elkstack: 
+    driver: bridge
