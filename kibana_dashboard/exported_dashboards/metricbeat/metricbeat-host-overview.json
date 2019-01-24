@@ -1,0 +1,13 @@
+{
+  "version": "6.2.4",
+  "objects": [
+    {
+      "id": "79ffd6e0-faa0-11e6-947f",
+      "type": "dashboard",
+      "error": {
+        "statusCode": 404,
+        "message": "Not found"
+      }
+    }
+  ]
+}
